@@ -1,0 +1,8 @@
+numpy>=1.26
+scipy>=1.16
+torch>=2.2
+snntorch>=0.9.4
+mne>=1.12
+pulp>=3.3
+matplotlib>=3.8
+pytest>=8.0
