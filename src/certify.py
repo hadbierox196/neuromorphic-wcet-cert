@@ -88,7 +88,10 @@ def run(c_source_path: str, annotated_out_path: str, lean_dir: str,
     lean_paths = write_lean_stubs(applied, lean_dir)
 
     certified_latency_s = network_bound / CLOCK_HZ
+    # margin > 1.0  => WCET fits inside the deadline with room to spare (SAFE)
+    # margin < 1.0  => WCET exceeds the deadline (UNSAFE)
     margin = DEADLINE_S / certified_latency_s if certified_latency_s > 0 else float("inf")
+    deadline_met = certified_latency_s <= DEADLINE_S
 
     elapsed = time.time() - t0
 
@@ -106,6 +109,7 @@ def run(c_source_path: str, annotated_out_path: str, lean_dir: str,
             "certified_network_bound_cycles": network_bound,
             "certified_network_latency_s": certified_latency_s,
             "deadline_margin_x": margin,
+            "deadline_met": deadline_met,
         },
         "artifacts": {
             "annotated_c11": annotated_out_path,
