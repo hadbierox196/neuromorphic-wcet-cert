@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from src.model import SeizureLIFNet, N_CHANNELS := 23  # noqa: F841 (kept for clarity)
+from src.model import SeizureLIFNet
 from src.preprocessing import load_saved, WIN
 
 EPOCHS = 30
