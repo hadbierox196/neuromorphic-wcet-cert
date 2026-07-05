@@ -63,15 +63,77 @@ def extract_cfg(c_source: str) -> list[LIFLayerCFG]:
         inner_loop_header -> outer_loop_footer       (exit inner loop)
         outer_loop_footer -> outer_loop_header       (loop-back, n_out times)
         outer_loop_footer -> exit
+
+    Finds the outer/inner loop pair by actual brace-nesting (not just
+    textual order), and requires that pair be the *first* `for` loop
+    encountered in the function body. This means an unrelated loop
+    (buffer init, different compiler backend formatting, etc.) can never
+    be silently mis-bound as the outer or inner loop -- ValueError is
+    raised instead of guessing.
     """
     layers = []
-    pattern = re.compile(
-        r"void (lif_layer\d+)_step\(.*?\)\s*\{.*?for \(int i = 0; i < (\d+); i\+\+\)"
-        r".*?for \(int j = 0; j < (\d+); j\+\+\)",
-        re.DOTALL,
-    )
-    for match in pattern.finditer(c_source):
-        name, n_out, n_in = match.group(1), int(match.group(2)), int(match.group(3))
+    func_pattern = re.compile(r"void (lif_layer\d+)_step\(.*?\)\s*\{", re.DOTALL)
+    loop_pattern = re.compile(r"for \((?:int )?(\w+) = 0; \1 < (\d+); \1\+\+\)\s*\{")
+
+    def _loop_span(body: str, loop_match: "re.Match") -> tuple[int, int]:
+        """Given a loop match (whose .end() is just past its opening
+        brace), return (start, end) where end is the index just past the
+        loop's matching closing brace."""
+        depth = 1
+        pos = loop_match.end()
+        while depth > 0 and pos < len(body):
+            if body[pos] == "{":
+                depth += 1
+            elif body[pos] == "}":
+                depth -= 1
+            pos += 1
+        return loop_match.start(), pos
+
+    for func_match in func_pattern.finditer(c_source):
+        name = func_match.group(1)
+        body_start = func_match.end()
+        depth = 1
+        pos = body_start
+        while depth > 0 and pos < len(c_source):
+            if c_source[pos] == "{":
+                depth += 1
+            elif c_source[pos] == "}":
+                depth -= 1
+            pos += 1
+        body = c_source[body_start:pos]
+
+        loop_matches = list(loop_pattern.finditer(body))
+        if len(loop_matches) < 2:
+            raise ValueError(
+                f"{name}_step: expected at least 2 nested `for` loops "
+                f"(outer over output neurons, inner over input weights), "
+                f"found {len(loop_matches)}"
+            )
+
+        outer = inner = None
+        for i, candidate_outer in enumerate(loop_matches):
+            o_start, o_end = _loop_span(body, candidate_outer)
+            for candidate_inner in loop_matches[i + 1:]:
+                if o_start < candidate_inner.start() < o_end:
+                    outer, inner = candidate_outer, candidate_inner
+                    break
+            if outer is not None:
+                break
+
+        if outer is None:
+            raise ValueError(
+                f"{name}_step: no nested `for` loop pair found -- refusing "
+                f"to guess which loop is outer (n_out) vs inner (n_in)"
+            )
+        if loop_matches[0] is not outer:
+            raise ValueError(
+                f"{name}_step: found a `for` loop before the real outer/"
+                f"inner pair -- cannot safely determine which loop is the "
+                f"outer (n_out) loop. Refusing to guess."
+            )
+
+        n_out = int(outer.group(2))
+        n_in = int(inner.group(2))
         layers.append(_build_layer_cfg(name, n_in, n_out))
     return layers
 
